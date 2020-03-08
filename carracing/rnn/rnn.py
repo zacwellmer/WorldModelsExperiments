@@ -61,7 +61,7 @@ hps_sample = hps_model._replace(batch_size=1, max_seq_len=1, use_recurrent_dropo
 class MDNRNN():
   def __init__(self, hps, gpu_mode=True, reuse=False):
     self.hps = hps
-    with tf.variable_scope('mdn_rnn', reuse=reuse):
+    with tf.compat.v1.variable_scope('mdn_rnn', reuse=reuse):
       if not gpu_mode:
         with tf.device("/cpu:0"):
           print("model using cpu")
@@ -111,23 +111,23 @@ class MDNRNN():
     self.cell = cell
 
     self.sequence_lengths = LENGTH # assume every sample has same length.
-    self.input_x = tf.placeholder(dtype=tf.float32, shape=[self.hps.batch_size, self.hps.max_seq_len, INWIDTH])
-    self.output_x = tf.placeholder(dtype=tf.float32, shape=[self.hps.batch_size, self.hps.max_seq_len, OUTWIDTH])
+    self.input_x = tf.compat.v1.placeholder(dtype=tf.float32, shape=[self.hps.batch_size, self.hps.max_seq_len, INWIDTH])
+    self.output_x = tf.compat.v1.placeholder(dtype=tf.float32, shape=[self.hps.batch_size, self.hps.max_seq_len, OUTWIDTH])
 
     actual_input_x = self.input_x
     self.initial_state = cell.zero_state(batch_size=hps.batch_size, dtype=tf.float32) 
 
     NOUT = OUTWIDTH * KMIX * 3
 
-    with tf.variable_scope('RNN'):
-      output_w = tf.get_variable("output_w", [self.hps.rnn_size, NOUT])
-      output_b = tf.get_variable("output_b", [NOUT])
+    with tf.compat.v1.variable_scope('RNN'):
+      output_w = tf.compat.v1.get_variable("output_w", [self.hps.rnn_size, NOUT])
+      output_b = tf.compat.v1.get_variable("output_b", [NOUT])
 
-    output, last_state = tf.nn.dynamic_rnn(cell, actual_input_x, initial_state=self.initial_state,
+    output, last_state = tf.compat.v1.nn.dynamic_rnn(cell, actual_input_x, initial_state=self.initial_state,
                                            time_major=False, swap_memory=True, dtype=tf.float32, scope="RNN")
 
     output = tf.reshape(output, [-1, hps.rnn_size])
-    output = tf.nn.xw_plus_b(output, output_w, output_b)
+    output = tf.compat.v1.nn.xw_plus_b(output, output_w, output_b)
     output = tf.reshape(output, [-1, KMIX * 3])
     self.final_state = last_state    
 
@@ -138,12 +138,12 @@ class MDNRNN():
 
     def get_lossfunc(logmix, mean, logstd, y):
       v = logmix + tf_lognormal(y, mean, logstd)
-      v = tf.reduce_logsumexp(v, 1, keepdims=True)
-      return -tf.reduce_mean(v)
+      v = tf.reduce_logsumexp(input_tensor=v, axis=1, keepdims=True)
+      return -tf.reduce_mean(input_tensor=v)
 
     def get_mdn_coef(output):
       logmix, mean, logstd = tf.split(output, 3, 1)
-      logmix = logmix - tf.reduce_logsumexp(logmix, 1, keepdims=True)
+      logmix = logmix - tf.reduce_logsumexp(input_tensor=logmix, axis=1, keepdims=True)
       return logmix, mean, logstd
 
     out_logmix, out_mean, out_logstd = get_mdn_coef(output)
@@ -157,31 +157,31 @@ class MDNRNN():
 
     lossfunc = get_lossfunc(out_logmix, out_mean, out_logstd, flat_target_data)
 
-    self.cost = tf.reduce_mean(lossfunc)
+    self.cost = tf.reduce_mean(input_tensor=lossfunc)
 
     if self.hps.is_training == 1:
       self.lr = tf.Variable(self.hps.learning_rate, trainable=False)
-      optimizer = tf.train.AdamOptimizer(self.lr)
+      optimizer = tf.compat.v1.train.AdamOptimizer(self.lr)
 
       gvs = optimizer.compute_gradients(self.cost)
       capped_gvs = [(tf.clip_by_value(grad, -self.hps.grad_clip, self.hps.grad_clip), var) for grad, var in gvs]
       self.train_op = optimizer.apply_gradients(capped_gvs, global_step=self.global_step, name='train_step')
 
     # initialize vars
-    self.init = tf.global_variables_initializer()
+    self.init = tf.compat.v1.global_variables_initializer()
     
-    t_vars = tf.trainable_variables()
+    t_vars = tf.compat.v1.trainable_variables()
     self.assign_ops = {}
     for var in t_vars:
       #if var.name.startswith('mdn_rnn'):
       pshape = var.get_shape()
-      pl = tf.placeholder(tf.float32, pshape, var.name[:-2]+'_placeholder')
+      pl = tf.compat.v1.placeholder(tf.float32, pshape, var.name[:-2]+'_placeholder')
       assign_op = var.assign(pl)
       self.assign_ops[var] = (assign_op, pl)
     
   def init_session(self):
     """Launch TensorFlow session and initialize variables"""
-    self.sess = tf.Session(graph=self.g)
+    self.sess = tf.compat.v1.Session(graph=self.g)
     self.sess.run(self.init)
   def close_sess(self):
     """ Close TensorFlow session """
@@ -192,7 +192,7 @@ class MDNRNN():
     model_params = []
     model_shapes = []
     with self.g.as_default():
-      t_vars = tf.trainable_variables()
+      t_vars = tf.compat.v1.trainable_variables()
       for var in t_vars:
         #if var.name.startswith('mdn_rnn'):
         param_name = var.name
@@ -215,7 +215,7 @@ class MDNRNN():
     self.set_model_params(rparam)
   def set_model_params(self, params):
     with self.g.as_default():
-      t_vars = tf.trainable_variables()
+      t_vars = tf.compat.v1.trainable_variables()
       idx = 0
       for var in t_vars:
         #if var.name.startswith('mdn_rnn'):
