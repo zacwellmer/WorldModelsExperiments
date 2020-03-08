@@ -161,7 +161,7 @@ class MDNRNN():
     output = tf.reshape(output, [-1, hps.rnn_size])
     output = tf.compat.v1.nn.xw_plus_b(output, output_w, output_b)
     output = tf.reshape(output, [-1, KMIX * 3])
-    self.final_state = last_state    
+    self.final_state = last_state
 
     logSqrtTwoPI = np.log(np.sqrt(2.0 * np.pi))
 
@@ -364,12 +364,13 @@ def rnn_output_size(mode):
   return 32 # MODE_Z or MODE_Z_HIDDEN
 
 def rnn_output(state, z, mode):
+  state_h, state_c = state
   if mode == MODE_ZCH:
-    return np.concatenate([z, np.concatenate((state.c,state.h), axis=1)[0]])
+    return np.concatenate([z, np.concatenate((state_c,state_h), axis=1)[0]])
   if mode == MODE_ZC:
-    return np.concatenate([z, state.c[0]])
+    return np.concatenate([z, state_c[0]])
   if mode == MODE_ZH:
-    return np.concatenate([z, state.h[0]])
+    return np.concatenate([z, state_h[0]])
   return z # MODE_Z or MODE_Z_HIDDEN
 
 
