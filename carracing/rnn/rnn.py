@@ -2,8 +2,34 @@ import numpy as np
 from collections import namedtuple
 import json
 import tensorflow as tf
-
+from tensorflow.python.ops import array_ops
+import tensorflow_addons as tfa
+#tf.config.experimental_run_functions_eagerly(True) # only for debugging
 # hyperparameters for our model. I was using an older tf version, when HParams was not available ...
+
+def _generate_zero_filled_state_for_cell(cell, inputs, batch_size, dtype):
+  if inputs is not None:
+    batch_size = array_ops.shape(inputs)[0]
+    dtype = inputs.dtype
+  return _generate_zero_filled_state(batch_size, cell.state_size, dtype)
+
+
+def _generate_zero_filled_state(batch_size_tensor, state_size, dtype):
+  """Generate a zero filled tensor with shape [batch_size, state_size]."""
+  if batch_size_tensor is None or dtype is None:
+    raise ValueError(
+        'batch_size and dtype cannot be None while constructing initial state: '
+        'batch_size={}, dtype={}'.format(batch_size_tensor, dtype))
+
+  def create_zeros(unnested_state_size):
+    flat_dims = tf.TensorShape(unnested_state_size).as_list()
+    init_state_size = [batch_size_tensor] + flat_dims
+    return array_ops.zeros(init_state_size, dtype=dtype)
+
+  if tf.nest.is_nested(state_size):
+    return tf.nest.map_structure(create_zeros, state_size)
+  else:
+    return create_zeros(state_size)
 
 # controls whether we concatenate (z, c, h), etc for features used for car.
 MODE_ZCH = 0
@@ -57,6 +83,10 @@ def default_hps():
 hps_model = default_hps()
 hps_sample = hps_model._replace(batch_size=1, max_seq_len=1, use_recurrent_dropout=0, is_training=0)
 
+#@tf.function
+#def get_initial_state(cell, inputs):
+#    return cell.get_initial_state(inputs)
+
 # MDN-RNN model
 class MDNRNN():
   def __init__(self, hps, gpu_mode=True, reuse=False):
@@ -74,8 +104,8 @@ class MDNRNN():
         with self.g.as_default():
           self.build_model(hps)
     self.init_session()
+
   def build_model(self, hps):
-    
     self.num_mixture = hps.num_mixture
     KMIX = self.num_mixture # 5 mixtures
     INWIDTH = hps.input_seq_width # 35 channels
@@ -85,7 +115,8 @@ class MDNRNN():
     if hps.is_training:
       self.global_step = tf.Variable(0, name='global_step', trainable=False)
 
-    cell_fn = tf.contrib.rnn.LayerNormBasicLSTMCell # use LayerNormLSTM
+    #cell_fn = tfa.rnn.LayerNormLSTMCell # use LayerNormLSTM. default is false
+    cell_fn = tf.keras.layers.LSTMCell
 
     use_recurrent_dropout = False if self.hps.use_recurrent_dropout == 0 else True
     use_input_dropout = False if self.hps.use_input_dropout == 0 else True
@@ -96,7 +127,8 @@ class MDNRNN():
     if use_recurrent_dropout:
       cell = cell_fn(hps.rnn_size, layer_norm=use_layer_norm, dropout_keep_prob=self.hps.recurrent_dropout_prob)
     else:
-      cell = cell_fn(hps.rnn_size, layer_norm=use_layer_norm)
+      #cell = cell_fn(hps.rnn_size, layer_norm=use_layer_norm)
+      cell = cell_fn(units=hps.rnn_size)#, layer_norm=use_layer_norm)
 
     # multi-layer, and dropout:
     print("input dropout mode =", use_input_dropout)
@@ -115,16 +147,16 @@ class MDNRNN():
     self.output_x = tf.compat.v1.placeholder(dtype=tf.float32, shape=[self.hps.batch_size, self.hps.max_seq_len, OUTWIDTH])
 
     actual_input_x = self.input_x
-    self.initial_state = cell.zero_state(batch_size=hps.batch_size, dtype=tf.float32) 
+    #self.initial_state = cell.zero_state(batch_size=hps.batch_size, dtype=tf.float32) 
 
     NOUT = OUTWIDTH * KMIX * 3
 
     with tf.compat.v1.variable_scope('RNN'):
       output_w = tf.compat.v1.get_variable("output_w", [self.hps.rnn_size, NOUT])
       output_b = tf.compat.v1.get_variable("output_b", [NOUT])
+      self.initial_state = _generate_zero_filled_state_for_cell(cell, actual_input_x, None, None)
+    output, last_state = tf.compat.v1.nn.dynamic_rnn(cell, actual_input_x, initial_state=self.initial_state, time_major=False, swap_memory=True, dtype=tf.float32, scope="RNN")
 
-    output, last_state = tf.compat.v1.nn.dynamic_rnn(cell, actual_input_x, initial_state=self.initial_state,
-                                           time_major=False, swap_memory=True, dtype=tf.float32, scope="RNN")
 
     output = tf.reshape(output, [-1, hps.rnn_size])
     output = tf.compat.v1.nn.xw_plus_b(output, output_w, output_b)
@@ -217,10 +249,24 @@ class MDNRNN():
     with self.g.as_default():
       t_vars = tf.compat.v1.trainable_variables()
       idx = 0
+
+      # rnn parameters of kernel and recurrent kernel changed
+      kernel_idx = 2 # hack city baby
+      params_formatted = []
+      for i in range(len(params)):
+        p_i = np.array(params[i])
+        if i == kernel_idx:
+          params_formatted.append(p_i[:self.hps.input_seq_width]) # input kernel parameters
+          params_formatted.append(p_i[self.hps.input_seq_width:]) # recurrent kernel parameters
+        else:
+          params_formatted.append(p_i)
+      params = params_formatted
+
       for var in t_vars:
         #if var.name.startswith('mdn_rnn'):
         pshape = tuple(var.get_shape().as_list())
         p = np.array(params[idx])
+        print(var.name, pshape, p.shape)
         assert pshape == p.shape, "inconsistent shape"
         assign_op, pl = self.assign_ops[var]
         self.sess.run(assign_op, feed_dict={pl.name: p/10000.})
@@ -229,6 +275,7 @@ class MDNRNN():
     with open(jsonfile, 'r') as f:
       params = json.load(f)
     self.set_model_params(params)
+
   def save_json(self, jsonfile='rnn.json'):
     model_params, model_shapes, model_names = self.get_model_params()
     qparams = []
