@@ -7,7 +7,9 @@ import sys
 from env import make_env
 import time
 
-from vae.vae import ConvVAE
+#from vae.vae import ConvVAE
+import tensorflow as tf
+from vae.vae2 import CVAE
 from rnn.rnn import hps_sample, MDNRNN, rnn_init_state, rnn_next_state, rnn_output, rnn_output_size
 
 render_mode = True
@@ -49,12 +51,14 @@ class Model:
   ''' simple one layer model for car racing '''
   def __init__(self, load_model=True):
     self.env_name = "carracing"
-    self.vae = ConvVAE(batch_size=1, gpu_mode=False, is_training=False, reuse=True)
-
+    #self.vae = ConvVAE(batch_size=1, gpu_mode=False, is_training=False, reuse=True)
+    self.vae = CVAE(batch_size=1)
     self.rnn = MDNRNN(hps_sample, gpu_mode=False, reuse=True)
 
     if load_model:
-      self.vae.load_json('vae/vae.json')
+      #self.vae.load_json('vae/vae.json')
+      trained_vae = tf.keras.models.load_model('tf_vae', compile=False)
+      self.vae.set_weights(trained_vae.get_weights())
       self.rnn.load_json('rnn/rnn.json')
 
     self.state = rnn_init_state(self.rnn)
@@ -88,7 +92,8 @@ class Model:
     # convert raw obs to z, mu, logvar
     result = np.copy(obs).astype(np.float)/255.0
     result = result.reshape(1, 64, 64, 3)
-    mu, logvar = self.vae.encode_mu_logvar(result)
+    #mu, logvar = self.vae.encode_mu_logvar(result)
+    mu, logvar = self.vae.encode(result)
     mu = mu[0]
     logvar = logvar[0]
     s = logvar.shape

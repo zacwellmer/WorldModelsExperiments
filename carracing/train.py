@@ -23,6 +23,9 @@ from es import CMAES, SimpleGA, OpenES, PEPG
 import argparse
 import time
 
+import tensorflow as tf
+tf.config.set_visible_devices([], 'GPU')
+
 ### ES related code
 num_episode = 1
 eval_steps = 25 # evaluate every N_eval steps
