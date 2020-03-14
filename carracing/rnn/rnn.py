@@ -252,16 +252,16 @@ class MDNRNN():
       idx = 0
 
       # rnn parameters of kernel and recurrent kernel changed between david's version and ours
-      #kernel_idx = 2 # hack city baby
-      #params_formatted = []
-      #for i in range(len(params)):
-      #  p_i = np.array(params[i])
-      #  if i == kernel_idx:
-      #    params_formatted.append(p_i[:self.hps.input_seq_width]) # input kernel parameters
-      #    params_formatted.append(p_i[self.hps.input_seq_width:]) # recurrent kernel parameters
-      #  else:
-      #    params_formatted.append(p_i)
-      #params = params_formatted
+      kernel_idx = 2 # hack city baby
+      params_formatted = []
+      for i in range(len(params)):
+        p_i = np.array(params[i])
+        if i == kernel_idx:
+          params_formatted.append(p_i[:self.hps.input_seq_width]) # input kernel parameters
+          params_formatted.append(p_i[self.hps.input_seq_width:]) # recurrent kernel parameters
+        else:
+          params_formatted.append(p_i)
+      params = params_formatted
 
       for var in t_vars:
         #if var.name.startswith('mdn_rnn'):
