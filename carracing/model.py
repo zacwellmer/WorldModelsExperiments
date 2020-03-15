@@ -56,7 +56,7 @@ class Model:
     self.rnn = MDNRNN(hps_sample, gpu_mode=False, reuse=True)
 
     if load_model:
-      self.vae.load_json('vae/vae.json')
+      self.vae.load_json('tf_vae/sm_vae.json')
       #trained_vae = tf.keras.models.load_model('tf_vae', compile=False)
       #self.vae.set_weights(trained_vae.get_weights())
       self.rnn.load_json('rnn/rnn.json')

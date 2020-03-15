@@ -69,7 +69,7 @@ vae = ConvVAE(z_size=z_size,
               reuse=False,
               gpu_mode=True) # use GPU on batchsize of 1000 -> much faster
 
-vae.load_json(os.path.join(model_path_name, 'vae.json'))
+vae.load_json(os.path.join(model_path_name, 'sm_vae.json'))
 
 mu_dataset = []
 logvar_dataset = []
