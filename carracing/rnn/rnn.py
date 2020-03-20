@@ -198,7 +198,8 @@ class MDNRNN():
         param_name = var.name
         p = self.sess.run(var)
         model_names.append(param_name)
-        params = np.round(p*10000).astype(np.int).tolist()
+        #params = np.round(p*10000).astype(np.int).tolist()
+        params = np.array(p).tolist()
         model_params.append(params)
         model_shapes.append(p.shape)
     return model_params, model_shapes, model_names
@@ -223,7 +224,7 @@ class MDNRNN():
         p = np.array(params[idx])
         assert pshape == p.shape, "inconsistent shape"
         assign_op, pl = self.assign_ops[var]
-        self.sess.run(assign_op, feed_dict={pl.name: p/10000.})
+        self.sess.run(assign_op, feed_dict={pl.name: p})#/10000.})
         idx += 1
   def load_json(self, jsonfile='rnn.json'):
     with open(jsonfile, 'r') as f:

@@ -10,7 +10,14 @@ import tensorflow as tf
 import random
 from vae.vae import ConvVAE, reset_graph
 
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
+from tensorflow.compat.v1 import ConfigProto
+from tensorflow.compat.v1 import InteractiveSession
+
+#config = ConfigProto()
+#config.gpu_options.per_process_gpu_memory_fraction = 1.0
+#config.gpu_options.allow_growth = True
+#session = InteractiveSession(config=config)
+
 
 DATA_DIR = "record"
 SERIES_DIR = "series"
@@ -18,19 +25,26 @@ model_path_name = "tf_vae"
 
 if not os.path.exists(SERIES_DIR):
     os.makedirs(SERIES_DIR)
+Z_SIZE = 32
+def ds_gen():
+    dirname = 'record'
+    filenames = os.listdir(dirname)[:10000] # only use first 10k episodes
+    n = len(filenames)
+    for j, fname in enumerate(filenames):
+        if not fname.endswith('npz'): 
+            continue
+        file_path = os.path.join(dirname, fname)
+        with np.load(file_path) as data:
+            N = data['obs'].shape[0]
+            for i, img in enumerate(data['obs']):
+                action = data['action'][i]
+                img_i = img / 255.0
+                zerod_outputs = np.zeros([2*Z_SIZE])
+                yield img_i, action 
 
-def load_raw_data_list(filelist):
-  data_list = []
-  action_list = []
-  counter = 0
-  for i in range(len(filelist)):
-    filename = filelist[i]
-    raw_data = np.load(os.path.join(DATA_DIR, filename))
-    data_list.append(raw_data['obs'])
-    action_list.append(raw_data['action'])
-    if ((i+1) % 1000 == 0):
-      print("loading file", (i+1))
-  return data_list, action_list
+def create_tf_dataset():
+    dataset = tf.data.Dataset.from_generator(ds_gen, output_types=(tf.float32, tf.float32), output_shapes=((64, 64, 3), (3)))
+    return dataset
 
 def encode_batch(batch_img):
   simple_obs = np.copy(batch_img).astype(np.float)/255.0
@@ -56,11 +70,11 @@ kl_tolerance=0.5
 filelist = os.listdir(DATA_DIR)
 filelist.sort()
 filelist = filelist[0:10000]
-
-dataset, action_dataset = load_raw_data_list(filelist)
+#dataset, action_dataset = load_raw_data_list(filelist)
+dataset = create_tf_dataset()
+dataset = dataset.batch(batch_size)
 
 reset_graph()
-
 vae = ConvVAE(z_size=z_size,
               batch_size=batch_size,
               learning_rate=learning_rate,
@@ -70,14 +84,17 @@ vae = ConvVAE(z_size=z_size,
               gpu_mode=True) # use GPU on batchsize of 1000 -> much faster
 
 vae.load_json(os.path.join(model_path_name, 'vae.json'))
-
 mu_dataset = []
 logvar_dataset = []
-for i in range(len(dataset)):
-  data_batch = dataset[i]
-  mu, logvar, z = encode_batch(data_batch)
+action_dataset = []
+i=0
+for obs_batch, action_batch in dataset:
+  i += 1
+  mu, logvar, _ = encode_batch(obs_batch)
+
   mu_dataset.append(mu.astype(np.float16))
   logvar_dataset.append(logvar.astype(np.float16))
+  action_dataset.append(action_batch.numpy())
   if ((i+1) % 100 == 0):
     print(i+1)
 

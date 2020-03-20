@@ -27,47 +27,28 @@ model_save_path = "tf_vae"
 if not os.path.exists(model_save_path):
   os.makedirs(model_save_path)
 
-def count_length_of_filelist(filelist):
-  # although this is inefficient, much faster than doing np.concatenate([giant list of blobs])..
-  N = len(filelist)
-  total_length = 0
-  for i in range(N):
-    filename = filelist[i]
-    raw_data = np.load(os.path.join("record", filename))['obs']
-    l = len(raw_data)
-    total_length += l
-    if (i % 1000 == 0):
-      print("loading file", i)
-  return  total_length
+def ds_gen():
+    dirname = 'record'
+    filenames = os.listdir(dirname)[:10000] # only use first 10k episodes
+    n = len(filenames)
+    for j, fname in enumerate(filenames):
+        if not fname.endswith('npz'): 
+            continue
+        file_path = os.path.join(dirname, fname)
+        with np.load(file_path) as data:
+            N = data['obs'].shape[0]
+            for i, img in enumerate(data['obs']):
+                img_i = img / 255.0
+                yield img_i
 
-def create_dataset(filelist, N=10000, M=1000): # N is 10000 episodes, M is number of timesteps
-  data = np.zeros((M*N, 64, 64, 3), dtype=np.uint8)
-  idx = 0
-  for i in range(N):
-    filename = filelist[i]
-    raw_data = np.load(os.path.join("record", filename))['obs']
-    l = len(raw_data)
-    if (idx+l) > (M*N):
-      data = data[0:idx]
-      print('premature break')
-      break
-    data[idx:idx+l] = raw_data
-    idx += l
-    if ((i+1) % 100 == 0):
-      print("loading file", i+1)
-  return data
+def create_tf_dataset():
+    dataset = tf.data.Dataset.from_generator(ds_gen, output_types=(tf.float32), output_shapes=((64, 64, 3)))
+    return dataset
 
-# load dataset from record/*. only use first 10K, sorted by filename.
-filelist = os.listdir(DATA_DIR)
-filelist.sort()
-filelist = filelist[0:10000]
-#print("check total number of images:", count_length_of_filelist(filelist))
-dataset = create_dataset(filelist)
-
-# split into batches:
-total_length = len(dataset)
-num_batches = int(np.floor(total_length/batch_size))
-print("num_batches", num_batches)
+dataset_size = 10000 * 1000 # 10k episodes each 1k steps long
+shuffle_size = 20 * 1000 # only loads 20 episodes for shuffle windows b/c im poor and don't have much RAM
+dataset = create_tf_dataset()
+dataset = dataset.shuffle(shuffle_size, reshuffle_each_iteration=True).batch(batch_size)
 
 reset_graph()
 
@@ -82,13 +63,8 @@ vae = ConvVAE(z_size=z_size,
 # train loop:
 print("train", "step", "loss", "recon_loss", "kl_loss")
 for epoch in range(NUM_EPOCH):
-  np.random.shuffle(dataset)
-  for idx in range(num_batches):
-    batch = dataset[idx*batch_size:(idx+1)*batch_size]
-
-    obs = batch.astype(np.float)/255.0
-
-    feed = {vae.x: obs,}
+  for obs in dataset:
+    feed = {vae.x: obs.numpy(),}
 
     (train_loss, r_loss, kl_loss, train_step, _) = vae.sess.run([
       vae.loss, vae.r_loss, vae.kl_loss, vae.global_step, vae.train_op
