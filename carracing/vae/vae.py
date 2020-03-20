@@ -34,10 +34,10 @@ class ConvVAE(object):
       self.x = tf.compat.v1.placeholder(tf.float32, shape=[None, 64, 64, 3])
 
       # Encoder
-      h = tf.compat.v1.layers.conv2d(self.x, 32, 4, strides=2, activation=tf.nn.relu, name="enc_conv1")
-      h = tf.compat.v1.layers.conv2d(h, 64, 4, strides=2, activation=tf.nn.relu, name="enc_conv2")
-      h = tf.compat.v1.layers.conv2d(h, 128, 4, strides=2, activation=tf.nn.relu, name="enc_conv3")
-      h = tf.compat.v1.layers.conv2d(h, 256, 4, strides=2, activation=tf.nn.relu, name="enc_conv4")
+      h = tf.keras.layers.Conv2D(32, 4, strides=2, activation=tf.nn.relu, name="enc_conv1")(self.x)
+      h = tf.keras.layers.Conv2D(64, 4, strides=2, activation=tf.nn.relu, name="enc_conv2")(h)
+      h = tf.keras.layers.Conv2D(128, 4, strides=2, activation=tf.nn.relu, name="enc_conv3")(h)
+      h = tf.keras.layers.Conv2D(256, 4, strides=2, activation=tf.nn.relu, name="enc_conv4")(h)
       h = tf.reshape(h, [-1, 2*2*256])
 
       # VAE
@@ -50,10 +50,10 @@ class ConvVAE(object):
       # Decoder
       h = tf.compat.v1.layers.dense(self.z, 4*256, name="dec_fc")
       h = tf.reshape(h, [-1, 1, 1, 4*256])
-      h = tf.compat.v1.layers.conv2d_transpose(h, 128, 5, strides=2, activation=tf.nn.relu, name="dec_deconv1")
-      h = tf.compat.v1.layers.conv2d_transpose(h, 64, 5, strides=2, activation=tf.nn.relu, name="dec_deconv2")
-      h = tf.compat.v1.layers.conv2d_transpose(h, 32, 6, strides=2, activation=tf.nn.relu, name="dec_deconv3")
-      self.y = tf.compat.v1.layers.conv2d_transpose(h, 3, 6, strides=2, activation=tf.nn.sigmoid, name="dec_deconv4")
+      h = tf.keras.layers.Conv2DTranspose(128, 5, strides=2, activation=tf.nn.relu, name="dec_deconv1")(h)
+      h = tf.keras.layers.Conv2DTranspose(64, 5, strides=2, activation=tf.nn.relu, name="dec_deconv2")(h)
+      h = tf.keras.layers.Conv2DTranspose(32, 6, strides=2, activation=tf.nn.relu, name="dec_deconv3")(h)
+      self.y = tf.keras.layers.Conv2DTranspose(3, 6, strides=2, activation=tf.nn.sigmoid, name="dec_deconv4")(h)
       
       # train ops
       if self.is_training:

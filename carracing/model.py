@@ -59,7 +59,7 @@ class Model:
       self.vae.load_json('tf_vae/sm_vae.json')
       #trained_vae = tf.keras.models.load_model('tf_vae', compile=False)
       #self.vae.set_weights(trained_vae.get_weights())
-      self.rnn.load_json('rnn/rnn.json')
+      self.rnn.load_json('tf_rnn/rnn.json') 
 
     self.state = rnn_init_state(self.rnn)
     self.rnn_mode = True
