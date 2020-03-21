@@ -2,8 +2,6 @@ import numpy as np
 from collections import namedtuple
 import json
 import tensorflow as tf
-from tensorflow.python.ops import array_ops
-import tensorflow_addons as tfa
 
 # hyperparameters for our model. I was using an older tf version, when HParams was not available ...
 
@@ -34,29 +32,6 @@ HyperParams = namedtuple('HyperParams', ['num_steps',
                                          'output_dropout_prob',
                                          'is_training',
                                         ])
-
-def _generate_zero_filled_state_for_cell(cell, inputs, batch_size, dtype):
-  if inputs is not None:
-    batch_size = array_ops.shape(inputs)[0]
-    dtype = inputs.dtype
-  return _generate_zero_filled_state(batch_size, cell.state_size, dtype)
-
-def _generate_zero_filled_state(batch_size_tensor, state_size, dtype):
-  """Generate a zero filled tensor with shape [batch_size, state_size]."""
-  if batch_size_tensor is None or dtype is None:
-    raise ValueError(
-        'batch_size and dtype cannot be None while constructing initial state: '
-        'batch_size={}, dtype={}'.format(batch_size_tensor, dtype))
-
-  def create_zeros(unnested_state_size):
-    flat_dims = tf.TensorShape(unnested_state_size).as_list()
-    init_state_size = [batch_size_tensor] + flat_dims
-    return array_ops.zeros(init_state_size, dtype=dtype)
-
-  if tf.nest.is_nested(state_size):
-    return tf.nest.map_structure(create_zeros, state_size)
-  else:
-    return create_zeros(state_size)
 
 def default_hps():
   return HyperParams(num_steps=2000, # train model for 2000 steps.
@@ -143,7 +118,7 @@ class MDNRNN():
 
     actual_input_x = self.input_x
     #self.initial_state = cell.zero_state(batch_size=hps.batch_size, dtype=tf.float32) 
-    self.initial_state = _generate_zero_filled_state_for_cell(self.cell, actual_input_x, None, None)
+    self.initial_state = self.cell.get_initial_state(batch_size=hps.batch_size, dtype=tf.float32) 
 
     NOUT = OUTWIDTH * KMIX * 3
 
@@ -151,8 +126,13 @@ class MDNRNN():
       output_w = tf.compat.v1.get_variable("output_w", [self.hps.rnn_size, NOUT])
       output_b = tf.compat.v1.get_variable("output_b", [NOUT])
 
-    output, last_state = tf.compat.v1.nn.dynamic_rnn(cell, actual_input_x, initial_state=self.initial_state,
-                                           time_major=False, swap_memory=True, dtype=tf.float32, scope="RNN")
+      self.rnn = tf.keras.layers.RNN(cell=cell, time_major=False)
+      self.rnn.states = self.initial_state # otherwise initializes to None for some reason
+      
+      output = self.rnn(inputs=actual_input_x, initial_state=self.initial_state)
+      last_state = self.rnn.states
+    #output, last_state = tf.compat.v1.nn.dynamic_rnn(cell, actual_input_x, initial_state=self.initial_state,
+    #                                       time_major=False, swap_memory=True, dtype=tf.float32, scope="RNN")
 
     output = tf.reshape(output, [-1, hps.rnn_size])
     output = tf.compat.v1.nn.xw_plus_b(output, output_w, output_b)
@@ -303,7 +283,7 @@ def sample_sequence(sess, s_model, hps, init_z, actions, temperature=1.0, seq_le
 
   for i in range(seq_len):
     input_x = np.concatenate((prev_x, actions[i].reshape((1, 1, 3))), axis=2)
-    feed = {s_model.input_x: input_x, s_model.initial_state:prev_state}
+    feed = {s_model.input_x: input_x, s_model.initial_state[0]:prev_state[0], s_model.initial_state[1]:prev_state[1]}
     [logmix, mean, logstd, next_state] = sess.run([s_model.out_logmix, s_model.out_mean, s_model.out_logstd, s_model.final_state], feed)
 
     # adjust temperatures
@@ -336,7 +316,7 @@ def rnn_init_state(rnn):
 
 def rnn_next_state(rnn, z, a, prev_state):
   input_x = np.concatenate((z.reshape((1, 1, 32)), a.reshape((1, 1, 3))), axis=2)
-  feed = {rnn.input_x: input_x, rnn.initial_state:prev_state}
+  feed = {rnn.input_x: input_x, rnn.initial_state[0]:prev_state[0], rnn.initial_state[1]:prev_state[1]}
   return rnn.sess.run(rnn.final_state, feed)
 
 def rnn_output_size(mode):
@@ -347,12 +327,12 @@ def rnn_output_size(mode):
   return 32 # MODE_Z or MODE_Z_HIDDEN
 
 def rnn_output(state, z, mode):
+  state_h, state_c = state[0], state[1]
   if mode == MODE_ZCH:
-    return np.concatenate([z, np.concatenate((state.c,state.h), axis=1)[0]])
+    return np.concatenate([z, np.concatenate((state_c,state_h), axis=1)[0]])
   if mode == MODE_ZC:
-    return np.concatenate([z, state.c[0]])
+    return np.concatenate([z, state_c[0]])
   if mode == MODE_ZH:
-    return np.concatenate([z, state.h[0]])
+    return np.concatenate([z, state_h[0]])
   return z # MODE_Z or MODE_Z_HIDDEN
-
 

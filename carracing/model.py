@@ -54,8 +54,8 @@ class Model:
     self.rnn = MDNRNN(hps_sample, gpu_mode=False, reuse=True)
 
     if load_model:
-      self.vae.load_json('vae/vae.json')
-      self.rnn.load_json('rnn/rnn.json')
+      self.vae.load_json('tf_vae/vae.json')
+      self.rnn.load_json('tf_rnn/rnn.json')
 
     self.state = rnn_init_state(self.rnn)
     self.rnn_mode = True
