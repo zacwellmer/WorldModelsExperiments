@@ -2,6 +2,8 @@ import numpy as np
 from collections import namedtuple
 import json
 import tensorflow as tf
+from tensorflow.python.ops import array_ops
+import tensorflow_addons as tfa
 
 # hyperparameters for our model. I was using an older tf version, when HParams was not available ...
 
@@ -32,6 +34,29 @@ HyperParams = namedtuple('HyperParams', ['num_steps',
                                          'output_dropout_prob',
                                          'is_training',
                                         ])
+
+def _generate_zero_filled_state_for_cell(cell, inputs, batch_size, dtype):
+  if inputs is not None:
+    batch_size = array_ops.shape(inputs)[0]
+    dtype = inputs.dtype
+  return _generate_zero_filled_state(batch_size, cell.state_size, dtype)
+
+def _generate_zero_filled_state(batch_size_tensor, state_size, dtype):
+  """Generate a zero filled tensor with shape [batch_size, state_size]."""
+  if batch_size_tensor is None or dtype is None:
+    raise ValueError(
+        'batch_size and dtype cannot be None while constructing initial state: '
+        'batch_size={}, dtype={}'.format(batch_size_tensor, dtype))
+
+  def create_zeros(unnested_state_size):
+    flat_dims = tf.TensorShape(unnested_state_size).as_list()
+    init_state_size = [batch_size_tensor] + flat_dims
+    return array_ops.zeros(init_state_size, dtype=dtype)
+
+  if tf.nest.is_nested(state_size):
+    return tf.nest.map_structure(create_zeros, state_size)
+  else:
+    return create_zeros(state_size)
 
 def default_hps():
   return HyperParams(num_steps=2000, # train model for 2000 steps.
@@ -85,7 +110,8 @@ class MDNRNN():
     if hps.is_training:
       self.global_step = tf.Variable(0, name='global_step', trainable=False)
 
-    cell_fn = tf.contrib.rnn.LayerNormBasicLSTMCell # use LayerNormLSTM
+    #cell_fn = tfa.rnn.LayerNormBasicLSTMCell # use LayerNormLSTM
+    cell_fn = tf.keras.layers.LSTMCell
 
     use_recurrent_dropout = False if self.hps.use_recurrent_dropout == 0 else True
     use_input_dropout = False if self.hps.use_input_dropout == 0 else True
@@ -96,7 +122,8 @@ class MDNRNN():
     if use_recurrent_dropout:
       cell = cell_fn(hps.rnn_size, layer_norm=use_layer_norm, dropout_keep_prob=self.hps.recurrent_dropout_prob)
     else:
-      cell = cell_fn(hps.rnn_size, layer_norm=use_layer_norm)
+      #cell = cell_fn(hps.rnn_size, layer_norm=use_layer_norm)
+      cell = cell_fn(hps.rnn_size)
 
     # multi-layer, and dropout:
     print("input dropout mode =", use_input_dropout)
@@ -115,7 +142,8 @@ class MDNRNN():
     self.output_x = tf.compat.v1.placeholder(dtype=tf.float32, shape=[self.hps.batch_size, self.hps.max_seq_len, OUTWIDTH])
 
     actual_input_x = self.input_x
-    self.initial_state = cell.zero_state(batch_size=hps.batch_size, dtype=tf.float32) 
+    #self.initial_state = cell.zero_state(batch_size=hps.batch_size, dtype=tf.float32) 
+    self.initial_state = _generate_zero_filled_state_for_cell(self.cell, actual_input_x, None, None)
 
     NOUT = OUTWIDTH * KMIX * 3
 
@@ -160,7 +188,8 @@ class MDNRNN():
     self.cost = tf.reduce_mean(input_tensor=lossfunc)
 
     if self.hps.is_training == 1:
-      self.lr = tf.Variable(self.hps.learning_rate, trainable=False)
+      #self.lr = tf.Variable(self.hps.learning_rate, trainable=False)
+      self.lr = tf.compat.v1.placeholder(dtype=tf.float32, name='learning_rate')
       optimizer = tf.compat.v1.train.AdamOptimizer(self.lr)
 
       gvs = optimizer.compute_gradients(self.cost)
