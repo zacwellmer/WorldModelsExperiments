@@ -126,11 +126,11 @@ class MDNRNN():
       output_w = tf.compat.v1.get_variable("output_w", [self.hps.rnn_size, NOUT])
       output_b = tf.compat.v1.get_variable("output_b", [NOUT])
 
-      self.rnn = tf.keras.layers.RNN(cell=cell, time_major=False)
+      self.rnn = tf.keras.layers.RNN(cell=cell, return_sequences=True, return_state=True, time_major=False)
       self.rnn.states = self.initial_state # otherwise initializes to None for some reason
       
-      output = self.rnn(inputs=actual_input_x, initial_state=self.initial_state)
-      last_state = self.rnn.states
+      output, state_h, state_c = self.rnn(inputs=actual_input_x, initial_state=self.initial_state)
+      last_state = [state_h, state_c]
     #output, last_state = tf.compat.v1.nn.dynamic_rnn(cell, actual_input_x, initial_state=self.initial_state,
     #                                       time_major=False, swap_memory=True, dtype=tf.float32, scope="RNN")
 
