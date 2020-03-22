@@ -38,8 +38,6 @@ def ds_gen():
             N = data['obs'].shape[0]
             for i, img in enumerate(data['obs']):
                 action = data['action'][i]
-                img_i = img / 255.0
-                zerod_outputs = np.zeros([2*Z_SIZE])
                 yield img_i, action 
 
 def create_tf_dataset():

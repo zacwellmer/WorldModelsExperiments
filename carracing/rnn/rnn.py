@@ -117,7 +117,6 @@ class MDNRNN():
     self.output_x = tf.compat.v1.placeholder(dtype=tf.float32, shape=[self.hps.batch_size, self.hps.max_seq_len, OUTWIDTH])
 
     actual_input_x = self.input_x
-    #self.initial_state = cell.zero_state(batch_size=hps.batch_size, dtype=tf.float32) 
     self.initial_state = self.cell.get_initial_state(batch_size=hps.batch_size, dtype=tf.float32) 
 
     NOUT = OUTWIDTH * KMIX * 3
@@ -127,7 +126,6 @@ class MDNRNN():
       output_b = tf.compat.v1.get_variable("output_b", [NOUT])
 
       self.rnn = tf.keras.layers.RNN(cell=cell, return_sequences=True, return_state=True, time_major=False)
-      self.rnn.states = self.initial_state # otherwise initializes to None for some reason
       
       output, state_h, state_c = self.rnn(inputs=actual_input_x, initial_state=self.initial_state)
       last_state = [state_h, state_c]
@@ -283,7 +281,7 @@ def sample_sequence(sess, s_model, hps, init_z, actions, temperature=1.0, seq_le
 
   for i in range(seq_len):
     input_x = np.concatenate((prev_x, actions[i].reshape((1, 1, 3))), axis=2)
-    feed = {s_model.input_x: input_x, s_model.initial_state[0]:prev_state[0], s_model.initial_state[1]:prev_state[1]}
+    feed = {s_model.input_x: input_x, s_model.initial_state:prev_state}
     [logmix, mean, logstd, next_state] = sess.run([s_model.out_logmix, s_model.out_mean, s_model.out_logstd, s_model.final_state], feed)
 
     # adjust temperatures
@@ -316,7 +314,8 @@ def rnn_init_state(rnn):
 
 def rnn_next_state(rnn, z, a, prev_state):
   input_x = np.concatenate((z.reshape((1, 1, 32)), a.reshape((1, 1, 3))), axis=2)
-  feed = {rnn.input_x: input_x, rnn.initial_state[0]:prev_state[0], rnn.initial_state[1]:prev_state[1]}
+  feed = {rnn.input_x: input_x, rnn.initial_state[0]:prev_state[0], rnn.initial_state[1]: prev_state[1]}
+
   return rnn.sess.run(rnn.final_state, feed)
 
 def rnn_output_size(mode):
