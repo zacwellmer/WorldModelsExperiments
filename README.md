@@ -1,7 +1,9 @@
 # Docker
+```
 docker image build -t wm:1.0 -f Dockerfile.drwm .
 docker container run --gpus 1 --detach -it --name wm wm:1.0
 docker attach drwm_demo
+```
 
 # World Models Experiments
 
