@@ -136,7 +136,8 @@ class ConvVAE(object):
     rparam = []
     for s in mshape:
       #rparam.append(np.random.randn(*s)*stdev)
-      rparam.append(np.random.standard_cauchy(s)*stdev) # spice things up
+      sampled_param = np.random.standard_cauchy(s)*stdev / 10000.0 # I don't know if this is important
+      rparam.append(sampled_param) # spice things up
     return rparam
   def set_model_params(self, params):
     with self.g.as_default():

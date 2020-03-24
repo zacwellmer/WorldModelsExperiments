@@ -38,7 +38,7 @@ def ds_gen():
             N = data['obs'].shape[0]
             for i, img in enumerate(data['obs']):
                 action = data['action'][i]
-                yield img_i, action 
+                yield img, action 
 
 def create_tf_dataset():
     dataset = tf.data.Dataset.from_generator(ds_gen, output_types=(tf.float32, tf.float32), output_shapes=((64, 64, 3), (3)))
