@@ -1,3 +1,10 @@
+# Docker
+```
+docker image build -t wm:1.0 -f docker/Dockerfile.wm .
+docker container run --gpus 1 --detach -it --name wm wm:1.0
+docker attach drwm_demo
+```
+
 # World Models Experiments
 
 Step by step instructions of reproducing [World Models](https://worldmodels.github.io/) ([pdf](https://arxiv.org/abs/1803.10122)).
