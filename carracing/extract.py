@@ -45,7 +45,6 @@ for trial in range(MAX_TRIALS): # 200 trials per worker
         model.env.render("rgb_array")
 
       recording_obs.append(obs)
-
       z, mu, logvar = model.encode_obs(obs)
       action = model.get_action(z)
 

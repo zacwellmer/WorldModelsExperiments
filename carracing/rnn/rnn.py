@@ -216,7 +216,8 @@ class MDNRNN():
     rparam = []
     for s in mshape:
       #rparam.append(np.random.randn(*s)*stdev)
-      rparam.append(np.random.standard_cauchy(s)*stdev) # spice things up
+      sampled_param = np.random.standard_cauchy(s)*stdev / 10000. #idk if this is necessary
+      rparam.append(sampled_param) # spice things up
     return rparam
   def set_random_params(self, stdev=0.5):
     rparam = self.get_random_model_params(stdev)
