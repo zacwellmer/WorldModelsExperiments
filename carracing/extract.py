@@ -7,6 +7,7 @@ import random
 import os
 import gym
 
+from env import make_env
 from model import make_model
 
 MAX_FRAMES = 1000 # max length of carracing
@@ -18,38 +19,42 @@ DIR_NAME = 'record'
 if not os.path.exists(DIR_NAME):
     os.makedirs(DIR_NAME)
 
-model = make_model(load_model=False)
+controller = make_model()
 
 total_frames = 0
-model.make_env(render_mode=render_mode, full_episode=True)
+env = make_env(render_mode=render_mode, full_episode=False)
 for trial in range(MAX_TRIALS): # 200 trials per worker
   try:
     random_generated_int = random.randint(0, 2**31-1)
     filename = DIR_NAME+"/"+str(random_generated_int)+".npz"
     recording_obs = []
     recording_action = []
+    recording_reward = []
+    recording_done = []
 
     np.random.seed(random_generated_int)
-    model.env.seed(random_generated_int)
+    env.seed(random_generated_int)
 
     # random policy
-    model.init_random_model_params(stdev=np.random.rand()*0.01)
+    #controller.init_random_model_params(stdev=np.random.rand()*0.01)
+    # strong policy
+    controller.load_model('log/carracing.cma.16.64.json')
 
-    model.reset()
-    obs = model.env.reset() # pixels
+    obs = env.reset() # pixels
 
     for frame in range(MAX_FRAMES):
       if render_mode:
-        model.env.render("human")
+        env.render("human")
       else:
-        model.env.render("rgb_array")
+        env.render("rgb_array")
 
       recording_obs.append(obs)
-      z, mu, logvar = model.encode_obs(obs)
-      action = model.get_action(z)
+      action = controller.get_action(obs)
 
       recording_action.append(action)
-      obs, reward, done, info = model.env.step(action)
+      obs, reward, done, info = env.step(action)
+      recording_reward.append(reward)
+      recording_done.append(done)
 
       if done:
         break
@@ -58,10 +63,12 @@ for trial in range(MAX_TRIALS): # 200 trials per worker
     print("dead at", frame+1, "total recorded frames for this worker", total_frames)
     recording_obs = np.array(recording_obs, dtype=np.uint8)
     recording_action = np.array(recording_action, dtype=np.float16)
-    np.savez_compressed(filename, obs=recording_obs, action=recording_action)
+    recording_reward = np.array(recording_reward, dtype=np.float16)
+    recording_done = np.array(recording_done, dtype=np.bool)
+    np.savez_compressed(filename, obs=recording_obs, action=recording_action, reward=recording_reward, recording_done)
   except gym.error.Error:
     print("stupid gym error, life goes on")
-    model.env.close()
-    model.make_env(render_mode=render_mode)
+    env.close()
+    env = make_env(render_mode=render_mode)
     continue
-model.env.close()
+env.close()
