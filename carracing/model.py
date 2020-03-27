@@ -4,10 +4,9 @@ import random
 import json
 import sys
 
-from env import make_env
+from env import make_env, CarRacingMDNRNN
 import time
 
-from vae.vae import ConvVAE
 from rnn.rnn import hps_sample, MDNRNN, rnn_init_state, rnn_next_state, rnn_output, rnn_output_size
 
 render_mode = True
@@ -21,10 +20,10 @@ MODE_ZH = 4
 
 EXP_MODE = MODE_ZH
 
-def make_model(load_model=True):
+def make_model():
   # can be extended in the future.
-  model = Model(load_model=load_model)
-  return model
+  controller = Controller()
+  return controller
 
 def sigmoid(x):
   return 1 / (1 + np.exp(-x))
@@ -45,20 +44,10 @@ def softmax(x):
 def sample(p):
   return np.argmax(np.random.multinomial(1, p))
 
-class Model:
+class Controller:
   ''' simple one layer model for car racing '''
-  def __init__(self, load_model=True):
+  def __init__(self):
     self.env_name = "carracing"
-    self.vae = ConvVAE(batch_size=1, gpu_mode=False, is_training=False, reuse=True)
-
-    self.rnn = MDNRNN(hps_sample, gpu_mode=False, reuse=True)
-
-    if load_model:
-      self.vae.load_json('tf_vae/vae.json')
-      self.rnn.load_json('tf_rnn/rnn.json')
-
-    self.state = rnn_init_state(self.rnn)
-    self.rnn_mode = True
 
     self.input_size = rnn_output_size(EXP_MODE)
     self.z_size = 32
@@ -77,27 +66,7 @@ class Model:
 
     self.render_mode = False
 
-  def make_env(self, seed=-1, render_mode=False, full_episode=False):
-    self.render_mode = render_mode
-    self.env = make_env(self.env_name, seed=seed, render_mode=render_mode, full_episode=full_episode)
-
-  def reset(self):
-    self.state = rnn_init_state(self.rnn)
-
-  def encode_obs(self, obs):
-    # convert raw obs to z, mu, logvar
-    result = np.copy(obs).astype(np.float)/255.0
-    result = result.reshape(1, 64, 64, 3)
-    mu, logvar = self.vae.encode_mu_logvar(result)
-    mu = mu[0]
-    logvar = logvar[0]
-    s = logvar.shape
-    z = mu + np.exp(logvar/2.0) * np.random.randn(*s)
-    return z, mu, logvar
-
-  def get_action(self, z):
-    h = rnn_output(self.state, z, EXP_MODE)
-
+  def get_action(self, h):
     '''
     action = np.dot(h, self.weight) + self.bias
     action[0] = np.tanh(action[0])
@@ -112,8 +81,6 @@ class Model:
     
     action[1] = (action[1]+1.0) / 2.0
     action[2] = clip(action[2])
-
-    self.state = rnn_next_state(self.rnn, z, action, self.state)
 
     return action
 
@@ -146,12 +113,8 @@ class Model:
   def init_random_model_params(self, stdev=0.1):
     params = self.get_random_model_params(stdev=stdev)
     self.set_model_params(params)
-    vae_params = self.vae.get_random_model_params(stdev=stdev)
-    self.vae.set_model_params(vae_params)
-    rnn_params = self.rnn.get_random_model_params(stdev=stdev)
-    self.rnn.set_model_params(rnn_params)
 
-def simulate(model, train_mode=False, render_mode=True, num_episode=5, seed=-1, max_len=-1):
+def simulate(controller, env, train_mode=False, render_mode=True, num_episode=5, seed=-1, max_len=-1):
 
   reward_list = []
   t_list = []
@@ -166,46 +129,34 @@ def simulate(model, train_mode=False, render_mode=True, num_episode=5, seed=-1, 
   if (seed >= 0):
     random.seed(seed)
     np.random.seed(seed)
-    model.env.seed(seed)
+    env.seed(seed)
 
   for episode in range(num_episode):
 
-    model.reset()
-
-    obs = model.env.reset()
+    obs = env.reset()
 
     total_reward = 0.0
 
     random_generated_int = np.random.randint(2**31-1)
 
     filename = "record/"+str(random_generated_int)+".npz"
-    recording_mu = []
-    recording_logvar = []
-    recording_action = []
-    recording_reward = [0]
 
     for t in range(max_episode_length):
 
       if render_mode:
-        model.env.render("human")
+        env.render("human")
       else:
-        model.env.render('rgb_array')
+        env.render('rgb_array')
 
-      z, mu, logvar = model.encode_obs(obs)
-      action = model.get_action(z)
+      action = controller.get_action(obs)
 
-      recording_mu.append(mu)
-      recording_logvar.append(logvar)
-      recording_action.append(action)
 
-      obs, reward, done, info = model.env.step(action)
+      obs, reward, done, info = env.step(action)
 
       extra_reward = 0.0 # penalize for turning too frequently
       if train_mode and penalize_turning:
         extra_reward -= np.abs(action[0])/10.0
         reward += extra_reward
-
-      recording_reward.append(reward)
 
       #if (render_mode):
       #  print("action", action, "step reward", reward)
@@ -214,22 +165,6 @@ def simulate(model, train_mode=False, render_mode=True, num_episode=5, seed=-1, 
 
       if done:
         break
-
-    #for recording:
-    z, mu, logvar = model.encode_obs(obs)
-    action = model.get_action(z)
-    recording_mu.append(mu)
-    recording_logvar.append(logvar)
-    recording_action.append(action)
-
-    recording_mu = np.array(recording_mu, dtype=np.float16)
-    recording_logvar = np.array(recording_logvar, dtype=np.float16)
-    recording_action = np.array(recording_action, dtype=np.float16)
-    recording_reward = np.array(recording_reward, dtype=np.float16)
-
-    if not render_mode:
-      if recording_mode:
-        np.savez_compressed(filename, mu=recording_mu, logvar=recording_logvar, action=recording_action, reward=recording_reward)
 
     if render_mode:
       print("total reward", total_reward, "timesteps", t)
@@ -287,4 +222,9 @@ def main():
     print("seed", the_seed, "average_reward", np.mean(reward_list), "stdev", np.std(reward_list))
 
 if __name__ == "__main__":
-  main()
+  import env
+  e = env.make_env()
+  c = Controller()
+  import pdb; pdb.set_trace()
+  r, t = simulate(c, e, render_mode=False)
+  #main()

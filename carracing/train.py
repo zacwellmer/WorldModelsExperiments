@@ -18,6 +18,7 @@ import json
 import os
 import subprocess
 import sys
+from env import make_env
 from model import make_model, simulate
 from es import CMAES, SimpleGA, OpenES, PEPG
 import argparse
@@ -60,11 +61,12 @@ RESULT_PACKET_SIZE = 4*num_worker_trial
 ###
 
 def initialize_settings(sigma_init=0.1, sigma_decay=0.9999):
-  global population, filebase, game, model, num_params, es, PRECISION, SOLUTION_PACKET_SIZE, RESULT_PACKET_SIZE
+  global population, filebase, game, controller, env, num_params, es, PRECISION, SOLUTION_PACKET_SIZE, RESULT_PACKET_SIZE
   population = num_worker * num_worker_trial
   filebase = 'log/'+gamename+'.'+optimizer+'.'+str(num_episode)+'.'+str(population)
-  model = make_model()
-  num_params = model.param_count
+  controller = make_model()
+  env = make_env()
+  num_params = controller.param_count
   print("size of model", num_params)
 
   if optimizer == 'ses':
@@ -189,18 +191,19 @@ def decode_result_packet(packet):
 def worker(weights, seed, train_mode_int=1, max_len=-1):
 
   train_mode = (train_mode_int == 1)
-  model.set_model_params(weights)
-  reward_list, t_list = simulate(model,
+  controller.set_model_params(weights)
+  reward_list, t_list = simulate(controller, env,
     train_mode=train_mode, render_mode=False, num_episode=num_episode, seed=seed, max_len=max_len)
   if batch_mode == 'min':
     reward = np.min(reward_list)
   else:
     reward = np.mean(reward_list)
   t = np.mean(t_list)
+  print(t, reward)
   return reward, t
 
 def slave():
-  model.make_env()
+  env = make_env()
   packet = np.empty(SOLUTION_PACKET_SIZE, dtype=np.int32)
   while 1:
     comm.Recv(packet, source=0)
@@ -284,7 +287,7 @@ def master():
   filename_hist_best = filebase+'.hist_best.json'
   filename_best = filebase+'.best.json'
 
-  model.make_env()
+  env = make_env()
 
   t = 0
 
@@ -325,7 +328,7 @@ def master():
     model_params = es_solution[0] # best historical solution
     reward = es_solution[1] # best reward
     curr_reward = es_solution[2] # best of the current batch
-    model.set_model_params(np.array(model_params).round(4))
+    controller.set_model_params(np.array(model_params).round(4))
 
     r_max = int(np.max(reward_list)*100)/100.
     r_min = int(np.min(reward_list)*100)/100.

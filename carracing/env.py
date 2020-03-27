@@ -1,5 +1,6 @@
 import numpy as np
 import gym
+import tensorflow as tf
 
 from PIL import Image
 from gym.spaces.box import Box
@@ -26,8 +27,51 @@ class CarRacingWrapper(CarRacing):
       return _process_frame(obs), reward, False, {}
     return _process_frame(obs), reward, done, {}
 
-def make_env(env_name, seed=-1, render_mode=False, full_episode=False):
-  env = CarRacingWrapper(full_episode=full_episode)
+from vae.vae import ConvVAE as CVAE
+from rnn.rnn import MDNRNN, hps_sample, rnn_next_state, rnn_init_state
+class CarRacingMDNRNN(CarRacingWrapper):
+  def __init__(self, load_model=True, full_episode=False):
+    super(CarRacingMDNRNN, self).__init__(full_episode=full_episode)
+    self.vae = CVAE(batch_size=1)
+    self.rnn = MDNRNN(hps_sample)
+     
+    if load_model:
+      self.vae.load_json('tf_vae/vae.json')
+      self.rnn.load_json('tf_rnn/rnn.json')
+
+    self.rnn_states = rnn_init_state(self.rnn)
+    
+    self.full_episode = False 
+    self.observation_space = Box(low=np.NINF, high=np.Inf, shape=(32+256))
+
+  def encode_obs(self, obs):
+    # convert raw obs to z, mu, logvar
+    result = np.copy(obs).astype(np.float)/255.0
+    result = result.reshape(1, 64, 64, 3)
+    mu, logvar = self.vae.encode_mu_logvar(result)
+    mu = mu[0]
+    logvar = logvar[0]
+    s = logvar.shape
+    z = mu + np.exp(logvar/2.0) * np.random.randn(*s)
+    return z, mu, logvar
+
+  def reset(self):
+    self.rnn_states = rnn_init_state(self.rnn)
+    z_h = super(CarRacingWrapper, self).reset() # calls step
+    return z_h
+
+  def _step(self, action):
+    obs, reward, done, _ = super(CarRacingMDNRNN, self)._step(action)
+    z, _, _ = self.encode_obs(obs)
+    h = tf.squeeze(self.rnn_states[0])
+    z_h = tf.concat([z, h], axis=-1)
+
+    if action is not None: # don't compute state on reset
+        self.rnn_states = rnn_next_state(self.rnn, z, action, self.rnn_states)
+    return z_h, reward, done, {}
+
+def make_env(seed=-1, render_mode=False, full_episode=False):
+  env = CarRacingMDNRNN(full_episode=full_episode)
   if (seed >= 0):
     env.seed(seed)
   '''
