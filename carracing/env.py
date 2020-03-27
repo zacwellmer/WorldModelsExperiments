@@ -30,8 +30,8 @@ class CarRacingWrapper(CarRacing):
 from vae.vae import ConvVAE as CVAE
 from rnn.rnn import MDNRNN, hps_sample, rnn_next_state, rnn_init_state
 class CarRacingMDNRNN(CarRacingWrapper):
-  def __init__(self, load_model=True):
-    super(CarRacingWrapper, self).__init__()
+  def __init__(self, load_model=True, full_episode=False):
+    super(CarRacingMDNRNN, self).__init__(full_episode=full_episode)
     self.vae = CVAE(batch_size=1)
     self.rnn = MDNRNN(hps_sample)
      
@@ -70,8 +70,8 @@ class CarRacingMDNRNN(CarRacingWrapper):
         self.rnn_states = rnn_next_state(self.rnn, z, action, self.rnn_states)
     return z_h, reward, done, {}
 
-def make_env(env_name, seed=-1, render_mode=False, full_episode=False):
-  env = CarRacingWrapper(full_episode=full_episode)
+def make_env(seed=-1, render_mode=False, full_episode=False):
+  env = CarRacingMDNRNN(full_episode=full_episode)
   if (seed >= 0):
     env.seed(seed)
   '''
