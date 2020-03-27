@@ -61,7 +61,7 @@ hps_sample = hps_model._replace(batch_size=1, max_seq_len=1, use_recurrent_dropo
 class MDNRNN():
   def __init__(self, hps, gpu_mode=True, reuse=False):
     self.hps = hps
-    with tf.variable_scope('mdn_rnn', reuse=reuse):
+    with tf.compat.v1.variable_scope('mdn_rnn', reuse=reuse):
       if not gpu_mode:
         with tf.device("/cpu:0"):
           print("model using cpu")
@@ -85,7 +85,8 @@ class MDNRNN():
     if hps.is_training:
       self.global_step = tf.Variable(0, name='global_step', trainable=False)
 
-    cell_fn = tf.contrib.rnn.LayerNormBasicLSTMCell # use LayerNormLSTM
+    #cell_fn = tfa.rnn.LayerNormBasicLSTMCell # use LayerNormLSTM
+    cell_fn = tf.keras.layers.LSTMCell
 
     use_recurrent_dropout = False if self.hps.use_recurrent_dropout == 0 else True
     use_input_dropout = False if self.hps.use_input_dropout == 0 else True
@@ -96,7 +97,8 @@ class MDNRNN():
     if use_recurrent_dropout:
       cell = cell_fn(hps.rnn_size, layer_norm=use_layer_norm, dropout_keep_prob=self.hps.recurrent_dropout_prob)
     else:
-      cell = cell_fn(hps.rnn_size, layer_norm=use_layer_norm)
+      #cell = cell_fn(hps.rnn_size, layer_norm=use_layer_norm)
+      cell = cell_fn(hps.rnn_size)
 
     # multi-layer, and dropout:
     print("input dropout mode =", use_input_dropout)
@@ -111,23 +113,27 @@ class MDNRNN():
     self.cell = cell
 
     self.sequence_lengths = LENGTH # assume every sample has same length.
-    self.input_x = tf.placeholder(dtype=tf.float32, shape=[self.hps.batch_size, self.hps.max_seq_len, INWIDTH])
-    self.output_x = tf.placeholder(dtype=tf.float32, shape=[self.hps.batch_size, self.hps.max_seq_len, OUTWIDTH])
+    self.input_x = tf.compat.v1.placeholder(dtype=tf.float32, shape=[self.hps.batch_size, self.hps.max_seq_len, INWIDTH])
+    self.output_x = tf.compat.v1.placeholder(dtype=tf.float32, shape=[self.hps.batch_size, self.hps.max_seq_len, OUTWIDTH])
 
     actual_input_x = self.input_x
-    self.initial_state = cell.zero_state(batch_size=hps.batch_size, dtype=tf.float32) 
+    self.initial_state = self.cell.get_initial_state(batch_size=hps.batch_size, dtype=tf.float32) 
 
     NOUT = OUTWIDTH * KMIX * 3
 
-    with tf.variable_scope('RNN'):
-      output_w = tf.get_variable("output_w", [self.hps.rnn_size, NOUT])
-      output_b = tf.get_variable("output_b", [NOUT])
+    with tf.compat.v1.variable_scope('RNN'):
+      output_w = tf.compat.v1.get_variable("output_w", [self.hps.rnn_size, NOUT])
+      output_b = tf.compat.v1.get_variable("output_b", [NOUT])
 
-    output, last_state = tf.nn.dynamic_rnn(cell, actual_input_x, initial_state=self.initial_state,
-                                           time_major=False, swap_memory=True, dtype=tf.float32, scope="RNN")
+      self.rnn = tf.keras.layers.RNN(cell=cell, return_sequences=True, return_state=True, time_major=False)
+      
+      output, state_h, state_c = self.rnn(inputs=actual_input_x, initial_state=self.initial_state)
+      last_state = [state_h, state_c]
+    #output, last_state = tf.compat.v1.nn.dynamic_rnn(cell, actual_input_x, initial_state=self.initial_state,
+    #                                       time_major=False, swap_memory=True, dtype=tf.float32, scope="RNN")
 
     output = tf.reshape(output, [-1, hps.rnn_size])
-    output = tf.nn.xw_plus_b(output, output_w, output_b)
+    output = tf.compat.v1.nn.xw_plus_b(output, output_w, output_b)
     output = tf.reshape(output, [-1, KMIX * 3])
     self.final_state = last_state    
 
@@ -138,12 +144,12 @@ class MDNRNN():
 
     def get_lossfunc(logmix, mean, logstd, y):
       v = logmix + tf_lognormal(y, mean, logstd)
-      v = tf.reduce_logsumexp(v, 1, keepdims=True)
-      return -tf.reduce_mean(v)
+      v = tf.reduce_logsumexp(input_tensor=v, axis=1, keepdims=True)
+      return -tf.reduce_mean(input_tensor=v)
 
     def get_mdn_coef(output):
       logmix, mean, logstd = tf.split(output, 3, 1)
-      logmix = logmix - tf.reduce_logsumexp(logmix, 1, keepdims=True)
+      logmix = logmix - tf.reduce_logsumexp(input_tensor=logmix, axis=1, keepdims=True)
       return logmix, mean, logstd
 
     out_logmix, out_mean, out_logstd = get_mdn_coef(output)
@@ -157,31 +163,32 @@ class MDNRNN():
 
     lossfunc = get_lossfunc(out_logmix, out_mean, out_logstd, flat_target_data)
 
-    self.cost = tf.reduce_mean(lossfunc)
+    self.cost = tf.reduce_mean(input_tensor=lossfunc)
 
     if self.hps.is_training == 1:
-      self.lr = tf.Variable(self.hps.learning_rate, trainable=False)
-      optimizer = tf.train.AdamOptimizer(self.lr)
+      #self.lr = tf.Variable(self.hps.learning_rate, trainable=False)
+      self.lr = tf.compat.v1.placeholder(dtype=tf.float32, name='learning_rate')
+      optimizer = tf.compat.v1.train.AdamOptimizer(self.lr)
 
       gvs = optimizer.compute_gradients(self.cost)
       capped_gvs = [(tf.clip_by_value(grad, -self.hps.grad_clip, self.hps.grad_clip), var) for grad, var in gvs]
       self.train_op = optimizer.apply_gradients(capped_gvs, global_step=self.global_step, name='train_step')
 
     # initialize vars
-    self.init = tf.global_variables_initializer()
+    self.init = tf.compat.v1.global_variables_initializer()
     
-    t_vars = tf.trainable_variables()
+    t_vars = tf.compat.v1.trainable_variables()
     self.assign_ops = {}
     for var in t_vars:
       #if var.name.startswith('mdn_rnn'):
       pshape = var.get_shape()
-      pl = tf.placeholder(tf.float32, pshape, var.name[:-2]+'_placeholder')
+      pl = tf.compat.v1.placeholder(tf.float32, pshape, var.name[:-2]+'_placeholder')
       assign_op = var.assign(pl)
       self.assign_ops[var] = (assign_op, pl)
     
   def init_session(self):
     """Launch TensorFlow session and initialize variables"""
-    self.sess = tf.Session(graph=self.g)
+    self.sess = tf.compat.v1.Session(graph=self.g)
     self.sess.run(self.init)
   def close_sess(self):
     """ Close TensorFlow session """
@@ -192,13 +199,14 @@ class MDNRNN():
     model_params = []
     model_shapes = []
     with self.g.as_default():
-      t_vars = tf.trainable_variables()
+      t_vars = tf.compat.v1.trainable_variables()
       for var in t_vars:
         #if var.name.startswith('mdn_rnn'):
         param_name = var.name
         p = self.sess.run(var)
         model_names.append(param_name)
-        params = np.round(p*10000).astype(np.int).tolist()
+        #params = np.round(p*10000).astype(np.int).tolist()
+        params = np.array(p).tolist()
         model_params.append(params)
         model_shapes.append(p.shape)
     return model_params, model_shapes, model_names
@@ -208,14 +216,15 @@ class MDNRNN():
     rparam = []
     for s in mshape:
       #rparam.append(np.random.randn(*s)*stdev)
-      rparam.append(np.random.standard_cauchy(s)*stdev) # spice things up
+      sampled_param = np.random.standard_cauchy(s)*stdev / 10000. #idk if this is necessary
+      rparam.append(sampled_param) # spice things up
     return rparam
   def set_random_params(self, stdev=0.5):
     rparam = self.get_random_model_params(stdev)
     self.set_model_params(rparam)
   def set_model_params(self, params):
     with self.g.as_default():
-      t_vars = tf.trainable_variables()
+      t_vars = tf.compat.v1.trainable_variables()
       idx = 0
       for var in t_vars:
         #if var.name.startswith('mdn_rnn'):
@@ -223,7 +232,7 @@ class MDNRNN():
         p = np.array(params[idx])
         assert pshape == p.shape, "inconsistent shape"
         assign_op, pl = self.assign_ops[var]
-        self.sess.run(assign_op, feed_dict={pl.name: p/10000.})
+        self.sess.run(assign_op, feed_dict={pl.name: p})#/10000.})
         idx += 1
   def load_json(self, jsonfile='rnn.json'):
     with open(jsonfile, 'r') as f:
@@ -306,7 +315,8 @@ def rnn_init_state(rnn):
 
 def rnn_next_state(rnn, z, a, prev_state):
   input_x = np.concatenate((z.reshape((1, 1, 32)), a.reshape((1, 1, 3))), axis=2)
-  feed = {rnn.input_x: input_x, rnn.initial_state:prev_state}
+  feed = {rnn.input_x: input_x, rnn.initial_state[0]:prev_state[0], rnn.initial_state[1]: prev_state[1]}
+
   return rnn.sess.run(rnn.final_state, feed)
 
 def rnn_output_size(mode):
@@ -317,12 +327,12 @@ def rnn_output_size(mode):
   return 32 # MODE_Z or MODE_Z_HIDDEN
 
 def rnn_output(state, z, mode):
+  state_h, state_c = state[0], state[1]
   if mode == MODE_ZCH:
-    return np.concatenate([z, np.concatenate((state.c,state.h), axis=1)[0]])
+    return np.concatenate([z, np.concatenate((state_c,state_h), axis=1)[0]])
   if mode == MODE_ZC:
-    return np.concatenate([z, state.c[0]])
+    return np.concatenate([z, state_c[0]])
   if mode == MODE_ZH:
-    return np.concatenate([z, state.h[0]])
+    return np.concatenate([z, state_h[0]])
   return z # MODE_Z or MODE_Z_HIDDEN
-
 

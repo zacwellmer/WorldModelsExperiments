@@ -1,4 +1,4 @@
-for i in `seq 1 64`;
+for i in `seq 1 72`;
 do
   echo worker $i
   # on cloud:
